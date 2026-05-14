@@ -1,0 +1,175 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2112                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       pointVectorField;
+    object      pointDisplacement;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 1 0 0 0 0 0];
+
+internalField   uniform (0 0 0);
+
+boundaryField
+{
+    wing
+    {
+        type            codedFixedValue;
+        name            femModalWingDisplacement;
+        value           uniform (0 0 0);
+
+        codeInclude
+        #{
+            #include <algorithm>
+            #include <fstream>
+            #include <sstream>
+            #include <string>
+            #include <vector>
+        #};
+
+        code
+        #{
+            const scalar t = this->db().time().value();
+
+            // q(t) = A sin(2 pi f t + phase)
+            const scalar amplitude = 0.015;     // m
+            const scalar frequency = 20.0;      // Hz
+            const scalar phase = 0.0;           // rad
+
+            const scalar q =
+                amplitude
+               *sin(constant::mathematical::twoPi*frequency*t + phase);
+
+            static bool loaded = false;
+            static vectorField modeShape;
+
+            const pointField& pts = this->patch().localPoints();
+
+            if (!loaded)
+            {
+                const fileName modeFile =
+                    this->db().time().path()
+                   /"constant"
+                   /"modeShapes"
+                   /"wingMode1_mapped.csv";
+
+                std::ifstream input(modeFile.c_str());
+
+                if (!input.good())
+                {
+                    FatalErrorInFunction
+                        << "Cannot open mapped FEM mode file: "
+                        << modeFile << nl
+                        << "Expected columns: "
+                        << "patchPointI,x,y,z,phi_x,phi_y,phi_z"
+                        << exit(FatalError);
+                }
+
+                std::vector<point> csvPoints;
+                std::vector<vector> csvModes;
+                std::string line;
+
+                while (std::getline(input, line))
+                {
+                    if (line.empty() || line[0] == '#')
+                    {
+                        continue;
+                    }
+
+                    std::replace(line.begin(), line.end(), ',', ' ');
+                    std::istringstream row(line);
+
+                    label patchPointI;
+                    scalar x;
+                    scalar y;
+                    scalar z;
+                    scalar phiX;
+                    scalar phiY;
+                    scalar phiZ;
+
+                    if (row >> patchPointI >> x >> y >> z >> phiX >> phiY >> phiZ)
+                    {
+                        csvPoints.push_back(point(x, y, z));
+                        csvModes.push_back(vector(phiX, phiY, phiZ));
+                    }
+                }
+
+                if (csvPoints.empty())
+                {
+                    FatalErrorInFunction
+                        << "No FEM mode rows read from " << modeFile
+                        << exit(FatalError);
+                }
+
+                modeShape.setSize(pts.size(), vector::zero);
+
+                scalar maxNearestDistance = 0;
+
+                forAll(pts, pointi)
+                {
+                    label nearest = -1;
+                    scalar nearestDist2 = GREAT;
+
+                    for (std::size_t samplei = 0; samplei < csvPoints.size(); ++samplei)
+                    {
+                        const scalar dist2 = magSqr(pts[pointi] - csvPoints[samplei]);
+
+                        if (dist2 < nearestDist2)
+                        {
+                            nearestDist2 = dist2;
+                            nearest = label(samplei);
+                        }
+                    }
+
+                    modeShape[pointi] = csvModes[nearest];
+                    maxNearestDistance =
+                        max(maxNearestDistance, sqrt(nearestDist2));
+                }
+
+                Info<< "Loaded FEM mapped mode from " << modeFile << nl
+                    << "    rows: " << csvPoints.size() << nl
+                    << "    patch points: " << pts.size() << nl
+                    << "    max nearest distance: " << maxNearestDistance
+                    << nl << endl;
+
+                loaded = true;
+            }
+
+            vectorField disp(pts.size(), vector::zero);
+
+            forAll(pts, pointi)
+            {
+                disp[pointi] = q*modeShape[pointi];
+            }
+
+            operator==(disp);
+        #};
+    }
+
+    front
+    {
+        type            empty;
+    }
+
+    back
+    {
+        type            empty;
+    }
+
+    ".*"
+    {
+        type            fixedValue;
+        value           uniform (0 0 0);
+    }
+}
+
+
+// ************************************************************************* //
