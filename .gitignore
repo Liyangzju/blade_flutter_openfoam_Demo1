@@ -1,0 +1,50 @@
+# OpenFOAM generated time directories
+**/[0-9]*.[0-9]*/
+**/[1-9]/
+**/[1-9][0-9]*/
+!**/0/
+!**/0.orig/
+
+# Parallel decomposition and reconstructed/generated output
+processor*/
+**/processor*/
+postProcessing/
+**/postProcessing/
+dynamicCode/
+**/dynamicCode/
+
+# Generated meshes and geometry copied by Allrun
+**/constant/polyMesh/
+**/constant/extendedFeatureEdgeMesh/
+**/constant/triSurface/*.obj
+**/constant/triSurface/*.obj.gz
+**/constant/triSurface/*.eMesh
+
+# OpenFOAM logs and transient support files
+log.*
+*.log
+*.foam
+*.OpenFOAM
+*.orig.bak
+*.unmapped
+*.tmp
+
+# Visualization/output folders
+VTK/
+**/VTK/
+Ensight/
+**/Ensight/
+*.case
+*.encas
+paraview.*
+*.pvsm
+*.vtk
+*.vtp
+*.vtu
+
+# Editor/OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+*~

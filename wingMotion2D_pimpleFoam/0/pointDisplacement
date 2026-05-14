@@ -1,0 +1,80 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2112                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       pointVectorField;
+    object      pointDisplacement;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 1 0 0 0 0 0];
+
+internalField   uniform (0 0 0);
+
+boundaryField
+{
+    wing
+    {
+        type            codedFixedValue;
+        name            modalWingDisplacement;
+        value           uniform (0 0 0);
+
+        code
+        #{
+            const scalar t = this->db().time().value();
+
+            // First analytical bending-like mode for a 2D airfoil section.
+            const scalar amplitude = 0.015;     // m 振幅
+            const scalar frequency = 20.0;      // Hz 频率
+            const scalar phase = 0.0;           // rad 相位
+            const scalar xLeadingEdge = 0.0; 前缘点的坐标
+            const scalar chord = 1.0; 弦长
+
+            const scalar q =
+                amplitude
+               *sin(constant::mathematical::twoPi*frequency*t + phase); //q(t) = A sin(2 pi f t + phase)
+
+            const pointField& pts = this->patch().localPoints(); //读取叶片patch上的所有点坐标
+            vectorField disp(pts.size(), vector::zero); //创建vectorField类型的变量disp(是一个矢量，由pts.size(), vector::zero赋值)
+
+            forAll(pts, pointi)
+            {
+                scalar xi = (pts[pointi].x() - xLeadingEdge)/chord;
+                xi = min(max(xi, scalar(0)), scalar(1));
+
+                const scalar phi =
+                    sin(constant::mathematical::pi*xi);
+
+                disp[pointi] = vector(0, q*phi, 0); //给当前 patch 点赋位移，只在y方向振动
+            }
+
+            operator==(disp);
+        #};
+    }
+
+    front
+    {
+        type            empty;
+    }
+
+    back
+    {
+        type            empty;
+    }
+
+    ".*"
+    {
+        type            fixedValue;
+        value           uniform (0 0 0);
+    }
+}
+
+
+// ************************************************************************* //
