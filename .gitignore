@@ -20,6 +20,10 @@ dynamicCode/
 **/constant/triSurface/*.obj.gz
 **/constant/triSurface/*.eMesh
 
+# Demo2 is a FEM-mode import case and currently keeps its reference mesh.
+!demo2/constant/polyMesh/
+!demo2/constant/polyMesh/**
+
 # OpenFOAM logs and transient support files
 log.*
 *.log
