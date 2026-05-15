@@ -5,10 +5,12 @@ OpenFOAM v2112 development workspace for blade flutter experiments.
 Current focus:
 
 - Demo 1: 2D airfoil prescribed modal vibration
-- Demo 2: FEM surface mode import and mapped modal vibration
+- Demo 2: CalculiX FEM modal analysis and mapped modal vibration
+- Demo 3: 3D rotating propeller FEM modal vibration prototype
 - OpenFOAM case: `wingMotion2D_pimpleFoam`
 - Technical note: `docs/demo1二维自定义振动.md`
 - Technical note: `docs/demo2_FEM模态导入.md`
+- Technical note: `docs/demo3_三维旋转叶片FEM模态颤振.md`
 
 The repository should track source case setup and documentation, not solver output.
 
@@ -18,7 +20,9 @@ Tracked content should include:
 - `docs/`
 - case `0/`, `constant/`, `system/` dictionaries
 - future `scripts/`, `src/`, `cases/`
-- `demo2/constant/modeShapes/` mapped mode CSV files
+- `demo2/demo2A/` CalculiX FEM setup and extracted surface mode CSV files
+- `demo2/demo2B/` OpenFOAM case and mapped mode CSV files
+- `demo3/propeller/` 3D propeller rotating modal-motion case setup
 
 Ignored content includes:
 
@@ -26,7 +30,7 @@ Ignored content includes:
 - `processor*/`
 - `postProcessing/`
 - `dynamicCode/`
-- generated `constant/polyMesh/`
+- generated `constant/polyMesh/`, except the small tracked Demo2B reference mesh
 - logs and visualization output
 
 ## Git Setup

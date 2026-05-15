@@ -40,8 +40,8 @@ boundaryField
             const scalar t = this->db().time().value();
 
             // q(t) = A sin(2 pi f t + phase)
-            const scalar amplitude = 0.015;     // m
-            const scalar frequency = 20.0;      // Hz
+            const scalar amplitude = 0.015;     // m, since mode_01 is max-normalized
+            const scalar frequency = 461.955;   // Hz, CalculiX mode 1
             const scalar phase = 0.0;           // rad
 
             const scalar q =

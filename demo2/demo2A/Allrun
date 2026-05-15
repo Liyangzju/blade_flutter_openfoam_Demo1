@@ -1,0 +1,37 @@
+#!/bin/bash
+set -euo pipefail
+
+cd "${0%/*}"
+
+cfdCase="../demo2B"
+calcDir="calculix"
+jobName="wing_shell_modal"
+
+python3 ../../scripts/build_calculix_shell_from_patch.py \
+    --case "${cfdCase}" \
+    --patch wing \
+    --out "${calcDir}/${jobName}.inp" \
+    --node-map "${calcDir}/wing_shell_nodes.csv" \
+    --modes 6 \
+    --root-axis z \
+    --root-side min \
+    --root-tol 1e-8
+
+(
+    cd "${calcDir}"
+    ccx "${jobName}"
+)
+
+python3 ../../scripts/extract_calculix_modes.py \
+    --dat "${calcDir}/${jobName}.dat" \
+    --node-map "${calcDir}/wing_shell_nodes.csv" \
+    --out-dir surface_modes \
+    --normalize max
+
+python3 ../../scripts/map_fem_mode_to_patch.py \
+    --case "${cfdCase}" \
+    --patch wing \
+    --fem surface_modes/mode_01.csv \
+    --out "${cfdCase}/constant/modeShapes/wingMode1_mapped.csv"
+
+cp surface_modes/mode_frequencies.csv "${cfdCase}/constant/modeShapes/mode_frequencies.csv"

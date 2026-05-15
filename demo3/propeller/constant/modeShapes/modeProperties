@@ -1,0 +1,30 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2112                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      modeProperties;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+modeFile        propellerMode1_mapped.csv;
+
+// The mapped mode is expected to be max-normalized.
+amplitude       0.001;      // m
+frequency       100;        // Hz, replace with FEM modal frequency
+phase           0;          // rad
+
+// Must match constant/dynamicMeshDict rotatingMotionCoeffs.
+origin          (0 0 0);
+axis            (0 1 0);
+rotorOmega      158;        // rad/s
+
+
+// ************************************************************************* //

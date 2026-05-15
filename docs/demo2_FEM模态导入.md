@@ -1,6 +1,13 @@
-# Demo 2：FEM 模态导入驱动翼型振动
+# Demo 2：开源 FEM 模态导入驱动翼型振动
 
 ## 1. 目标
+
+当前 Demo2 已拆成两个部分：
+
+```text
+demo2/demo2A  -> CalculiX 开源 FEM 模态计算
+demo2/demo2B  -> OpenFOAM 读取 FEM 模态并驱动动网格
+```
 
 Demo 2 在 Demo 1 的基础上，将解析模态：
 
@@ -45,7 +52,8 @@ $$
 当前 Demo2 算例路径：
 
 ```text
-demo2
+demo2/demo2A
+demo2/demo2B
 ```
 
 ## 2. 数据流
@@ -67,11 +75,14 @@ $$
 当前文件约定：
 
 ```text
-demo2/constant/modeShapes/femMode1_sample.csv
-demo2/constant/modeShapes/wingMode1_mapped.csv
+demo2/demo2A/calculix/wing_shell_modal.inp
+demo2/demo2A/surface_modes/mode_frequencies.csv
+demo2/demo2A/surface_modes/mode_01.csv
+demo2/demo2B/constant/modeShapes/mode_frequencies.csv
+demo2/demo2B/constant/modeShapes/wingMode1_mapped.csv
 ```
 
-`femMode1_sample.csv` 表示 FEM 导出的表面模态数据。
+`mode_01.csv` 表示 CalculiX 求解并提取出来的第 1 阶表面模态。
 
 `wingMode1_mapped.csv` 表示已经映射到 OpenFOAM `wing` patch 点附近的模态数据。
 
@@ -176,54 +187,92 @@ $$
 
 该值用于检查 FEM 表面节点和 OpenFOAM patch 点之间的几何匹配质量。
 
-## 5. 当前示例数据
+## 5. 当前 CalculiX FEM 数据
 
-当前为了跑通 Demo2，先生成了一个合成 FEM 模态：
+当前 Demo2A 直接将 `demo2B` 的 `wing` patch 转成 CalculiX 壳单元模型。
 
-$$
-\boldsymbol{\phi}_{sample}(\xi)
-=
-\begin{bmatrix}
-0 \\
-\sin(\pi\xi) \\
-0
-\end{bmatrix}
-$$
-
-生成并映射命令：
+运行：
 
 ```bash
-python3 scripts/map_fem_mode_to_patch.py \
-    --case demo2 \
-    --patch wing \
-    --fem demo2/constant/modeShapes/femMode1_sample.csv \
-    --out demo2/constant/modeShapes/wingMode1_mapped.csv \
-    --make-sample-fem
+cd ~/OpenFOAM/liyang-v2112/run/wingMotion/demo2/demo2A
+./Allrun
 ```
 
-当前验证结果：
+`Allrun` 执行：
 
 ```text
-Mapped 756 patch points -> demo2/constant/modeShapes/wingMode1_mapped.csv
+OpenFOAM wing patch
+  -> CalculiX shell model
+  -> ccx frequency analysis
+  -> mode_01.csv ... mode_06.csv
+  -> wingMode1_mapped.csv
+```
+
+结构模态方程：
+
+$$
+\left(
+\boldsymbol{K}
+-
+\omega^2\boldsymbol{M}
+\right)
+\boldsymbol{\Phi}
+=
+\boldsymbol{0}
+$$
+
+默认材料：
+
+$$
+E=70\times10^9\ \mathrm{Pa}
+$$
+
+$$
+\nu=0.33
+$$
+
+$$
+\rho=2700\ \mathrm{kg/m^3}
+$$
+
+壳厚度：
+
+$$
+h=1.0\times10^{-3}\ \mathrm{m}
+$$
+
+约束：
+
+$$
+\boldsymbol{u}\big|_{z=z_{\min}}=\boldsymbol{0}
+$$
+
+当前提取到的频率：
+
+```text
+mode 1: 461.955 Hz
+mode 2: 487.599 Hz
+mode 3: 524.925 Hz
+mode 4: 578.086 Hz
+mode 5: 595.724 Hz
+mode 6: 629.825 Hz
+```
+
+当前映射结果：
+
+```text
+Mapped 756 patch points -> demo2/demo2B/constant/modeShapes/wingMode1_mapped.csv
 Maximum nearest-node distance: 0
 ```
 
-真实 FEM 数据接入时，将 `--fem` 指向真实导出的 CSV，并去掉 `--make-sample-fem`：
-
-```bash
-python3 scripts/map_fem_mode_to_patch.py \
-    --case demo2 \
-    --patch wing \
-    --fem path/to/femMode1.csv \
-    --out demo2/constant/modeShapes/wingMode1_mapped.csv
-```
+距离为 0 的原因是第一版 FEM 壳模型直接复用了 OpenFOAM `wing` patch 点。
 
 ## 6. `pointDisplacement` 实现
 
 Demo2 中：
 
 ```text
-demo2/0/pointDisplacement
+demo2/demo2B/0/pointDisplacement
 ```
 
 `wing` patch 使用：
@@ -269,14 +318,14 @@ $$
 
 ## 7. 当前振动参数
 
-当前参数写在 `demo2/0/pointDisplacement` 中：
+当前参数写在 `demo2/demo2B/0/pointDisplacement` 中：
 
 $$
 A=0.015\ \mathrm{m}
 $$
 
 $$
-f=20\ \mathrm{Hz}
+f=461.955\ \mathrm{Hz}
 $$
 
 $$
@@ -351,10 +400,13 @@ Loaded FEM mapped mode from ".../constant/modeShapes/wingMode1_mapped.csv"
 并完成：
 
 ```text
+Solving for cellDisplacementx
 Solving for cellDisplacementy
 Solving for Ux
 Solving for Uy
 Solving for p
+Solving for omega
+Solving for k
 End
 ```
 
@@ -425,4 +477,5 @@ src/modalMotion/modalDisplacementPointPatchVectorField
 
 | 日期 | 版本 | 内容 |
 | --- | ---: | --- |
+| 2026-05-14 | 0.2 | 加入 CalculiX 开源 FEM 壳单元模态计算，完成 `demo2A -> demo2B` 一键链路。 |
 | 2026-05-14 | 0.1 | 建立 Demo2 FEM 模态导入流程，完成 CSV 映射脚本、mapped mode 文件和 `codedFixedValue` 读取验证。 |

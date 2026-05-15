@@ -1,0 +1,245 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2112                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       pointVectorField;
+    object      pointDisplacement;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 1 0 0 0 0 0];
+
+internalField   uniform (0 0 0);
+
+boundaryField
+{
+    #includeEtc "caseDicts/setConstraintTypes"
+
+    inlet
+    {
+        type            fixedValue;
+        value           uniform (0 0 0);
+    }
+
+    outlet
+    {
+        type            fixedValue;
+        value           uniform (0 0 0);
+    }
+
+    outerCylinder
+    {
+        type            fixedValue;
+        value           uniform (0 0 0);
+    }
+
+    "propeller.*"
+    {
+        type            codedFixedValue;
+        name            propellerFemModalDisplacement;
+        value           uniform (0 0 0);
+
+        codeInclude
+        #{
+            #include "IOdictionary.H"
+            #include <algorithm>
+            #include <fstream>
+            #include <map>
+            #include <set>
+            #include <sstream>
+            #include <string>
+            #include <vector>
+        #};
+
+        code
+        #{
+            const Time& runTime = this->db().time();
+
+            IOdictionary modeDict
+            (
+                IOobject
+                (
+                    "modeProperties",
+                    runTime.constant()/"modeShapes",
+                    this->db(),
+                    IOobject::MUST_READ_IF_MODIFIED,
+                    IOobject::NO_WRITE
+                )
+            );
+
+            const scalar amplitude =
+                modeDict.lookupOrDefault<scalar>("amplitude", 0.001);
+            const scalar frequency =
+                modeDict.lookupOrDefault<scalar>("frequency", 100.0);
+            const scalar phase =
+                modeDict.lookupOrDefault<scalar>("phase", 0.0);
+            const scalar rotorOmega =
+                modeDict.lookupOrDefault<scalar>("rotorOmega", 158.0);
+
+            vector axis =
+                modeDict.lookupOrDefault<vector>("axis", vector(0, 1, 0));
+
+            const scalar axisMag = mag(axis);
+            if (axisMag < VSMALL)
+            {
+                FatalErrorInFunction
+                    << "modeProperties axis magnitude is zero"
+                    << exit(FatalError);
+            }
+            axis /= axisMag;
+
+            const word modeFileName =
+                modeDict.lookupOrDefault<word>
+                (
+                    "modeFile",
+                    "propellerMode1_mapped.csv"
+                );
+
+            const scalar t = runTime.value();
+            const scalar q =
+                amplitude
+               *sin(constant::mathematical::twoPi*frequency*t + phase);
+
+            const scalar theta = rotorOmega*t;
+            const scalar c = cos(theta);
+            const scalar s = sin(theta);
+
+            const pointField& pts = this->patch().localPoints();
+            const std::string patchName = this->patch().name();
+
+            static std::map<std::string, vectorField> modeShapeByPatch;
+            static std::set<std::string> loadedPatches;
+
+            if (loadedPatches.find(patchName) == loadedPatches.end())
+            {
+                const fileName modeFile =
+                    runTime.path()
+                   /"constant"
+                   /"modeShapes"
+                   /modeFileName;
+
+                std::ifstream input(modeFile.c_str());
+
+                if (!input.good())
+                {
+                    FatalErrorInFunction
+                        << "Cannot open mapped FEM mode file: "
+                        << modeFile << nl
+                        << "Expected columns: "
+                        << "patchName,patchPointI,x,y,z,phi_x,phi_y,phi_z"
+                        << exit(FatalError);
+                }
+
+                std::vector<point> csvPoints;
+                std::vector<vector> csvModes;
+                std::string line;
+
+                while (std::getline(input, line))
+                {
+                    if (line.empty() || line[0] == '#')
+                    {
+                        continue;
+                    }
+
+                    std::replace(line.begin(), line.end(), ',', ' ');
+                    std::istringstream row(line);
+
+                    std::string rowPatchName;
+                    label patchPointI;
+                    scalar x;
+                    scalar y;
+                    scalar z;
+                    scalar phiX;
+                    scalar phiY;
+                    scalar phiZ;
+
+                    if
+                    (
+                        row
+                     >> rowPatchName
+                     >> patchPointI
+                     >> x >> y >> z
+                     >> phiX >> phiY >> phiZ
+                    )
+                    {
+                        if (rowPatchName == patchName)
+                        {
+                            csvPoints.push_back(point(x, y, z));
+                            csvModes.push_back(vector(phiX, phiY, phiZ));
+                        }
+                    }
+                }
+
+                if (csvPoints.empty())
+                {
+                    FatalErrorInFunction
+                        << "No FEM mode rows for patch " << patchName
+                        << " read from " << modeFile
+                        << exit(FatalError);
+                }
+
+                vectorField modeShape0(pts.size(), vector::zero);
+
+                scalar maxNearestDistance = 0;
+
+                forAll(pts, pointi)
+                {
+                    label nearest = -1;
+                    scalar nearestDist2 = GREAT;
+
+                    for (std::size_t samplei = 0; samplei < csvPoints.size(); ++samplei)
+                    {
+                        const scalar dist2 = magSqr(pts[pointi] - csvPoints[samplei]);
+
+                        if (dist2 < nearestDist2)
+                        {
+                            nearestDist2 = dist2;
+                            nearest = label(samplei);
+                        }
+                    }
+
+                    modeShape0[pointi] = csvModes[nearest];
+                    maxNearestDistance =
+                        max(maxNearestDistance, sqrt(nearestDist2));
+                }
+
+                Info<< "Loaded propeller FEM mode for patch " << patchName << nl
+                    << "    file: " << modeFile << nl
+                    << "    rows for patch: " << csvPoints.size() << nl
+                    << "    patch points: " << pts.size() << nl
+                    << "    max nearest distance: " << maxNearestDistance
+                    << nl << endl;
+
+                modeShapeByPatch[patchName] = modeShape0;
+                loadedPatches.insert(patchName);
+            }
+
+            const vectorField& modeShape0 = modeShapeByPatch[patchName];
+
+            vectorField disp(pts.size(), vector::zero);
+
+            forAll(pts, pointi)
+            {
+                const vector v = q*modeShape0[pointi];
+
+                // Rotate the blade-fixed modal vector with the rigid propeller.
+                disp[pointi] =
+                    c*v
+                  + s*(axis ^ v)
+                  + (1 - c)*(axis & v)*axis;
+            }
+
+            operator==(disp);
+        #};
+    }
+}
+
+
+// ************************************************************************* //
