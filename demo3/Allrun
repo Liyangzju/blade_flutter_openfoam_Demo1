@@ -1,0 +1,75 @@
+#!/bin/sh
+cd "${0%/*}" || exit
+. ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions
+
+if notTest "$@"
+then
+    calcDir="fem/calculix"
+    jobName="six_blade_shell_modal"
+    modeDir="fem/surface_modes"
+    shellThickness="${SHELL_THICKNESS:-1e-5}"
+    minShellArea="${MIN_SHELL_AREA:-1e-8}"
+
+    mkdir -p "$calcDir" "$modeDir" constant/modeShapes
+
+    runApplication foamFormatConvert
+
+    python3 ../scripts/build_calculix_shell_from_patches.py \
+        --case . \
+        --patch-regex 'blade.*|hub' \
+        --root-patch-regex 'hub' \
+        --out "${calcDir}/${jobName}.inp" \
+        --node-map "${calcDir}/six_blade_shell_nodes.csv" \
+        --modes 6 \
+        --origin '(0 0 0)' \
+        --axis '(0 0 1)' \
+        --root-ratio 0.08 \
+        --thickness "$shellThickness" \
+        --min-area "$minShellArea"
+
+    (
+        cd "$calcDir"
+        ccx "$jobName"
+    )
+
+    python3 ../scripts/extract_calculix_modes.py \
+        --dat "${calcDir}/${jobName}.dat" \
+        --node-map "${calcDir}/six_blade_shell_nodes.csv" \
+        --out-dir "$modeDir" \
+        --normalize max
+
+    cp "${modeDir}/mode_frequencies.csv" constant/modeShapes/mode_frequencies.csv
+
+    firstMode=$(awk -F, 'NR > 1 && $2 + 0 > 1e-9 {printf "%02d\n", $1; exit}' constant/modeShapes/mode_frequencies.csv)
+    firstFrequency=$(awk -F, 'NR > 1 && $2 + 0 > 1e-9 {print $2; exit}' constant/modeShapes/mode_frequencies.csv)
+
+    if [ -z "$firstMode" ] || [ -z "$firstFrequency" ]
+    then
+        echo "No positive CalculiX modal frequency found in constant/modeShapes/mode_frequencies.csv" >&2
+        exit 1
+    fi
+
+    foamDictionary \
+        -entry frequency \
+        -set "$firstFrequency" \
+        constant/modeShapes/modeProperties
+
+    python3 ../scripts/map_fem_mode_to_patches.py \
+        --case . \
+        --patch-regex 'blade.*' \
+        --fem "${modeDir}/mode_${firstMode}.csv" \
+        --out constant/modeShapes/bladeMode1_mapped.csv
+
+    runApplication decomposePar
+
+    for proc in processor*
+    do
+        [ -d "$proc/constant" ] && cp -rf constant/modeShapes "$proc/constant/"
+    done
+
+    runParallel $(getApplication)
+
+    runApplication reconstructPar
+fi
+
+#------------------------------------------------------------------------------
