@@ -9,57 +9,57 @@ Output mapped CSV columns:
 
 The Demo3 propeller pointDisplacement boundary condition reads this mapped
 format and selects rows by the current patch name.
-"""
 
-from __future__ import annotations
+This script intentionally avoids newer Python syntax so it can run on older
+server python3 installations.
+"""
 
 import argparse
 import csv
 import math
 import re
-from dataclasses import dataclass
 from pathlib import Path
 
 
-@dataclass(frozen=True)
-class Point:
-    x: float
-    y: float
-    z: float
+class Point(object):
+    def __init__(self, x, y, z):
+        self.x = x
+        self.y = y
+        self.z = z
 
-    def __sub__(self, other: "Point") -> "Point":
+    def __sub__(self, other):
         return Point(self.x - other.x, self.y - other.y, self.z - other.z)
 
-    def __add__(self, other: "Point") -> "Point":
+    def __add__(self, other):
         return Point(self.x + other.x, self.y + other.y, self.z + other.z)
 
-    def scale(self, value: float) -> "Point":
+    def scale(self, value):
         return Point(self.x * value, self.y * value, self.z * value)
 
 
-@dataclass(frozen=True)
-class FemNode:
-    node_id: str
-    point: Point
-    phi: Point
+class FemNode(object):
+    def __init__(self, node_id, point, phi):
+        self.node_id = node_id
+        self.point = point
+        self.phi = phi
 
 
-@dataclass(frozen=True)
-class KdNode:
-    item: FemNode
-    axis: int
-    left: "KdNode | None"
-    right: "KdNode | None"
+class KdNode(object):
+    def __init__(self, item, axis, left, right):
+        self.item = item
+        self.axis = axis
+        self.left = left
+        self.right = right
 
 
-@dataclass(frozen=True)
-class PatchInfo:
-    name: str
-    n_faces: int
-    start_face: int
+class PatchInfo(object):
+    def __init__(self, name, n_faces, start_face):
+        self.name = name
+        self.n_faces = n_faces
+        self.start_face = start_face
 
 
-def _next_count(lines: list[str], start: int = 0) -> tuple[int, int]:
+def _next_count(lines, start=0):
     for i in range(start, len(lines)):
         text = lines[i].strip()
         if text.isdigit():
@@ -67,35 +67,36 @@ def _next_count(lines: list[str], start: int = 0) -> tuple[int, int]:
     raise ValueError("Could not find OpenFOAM list count")
 
 
-def read_points(points_file: Path) -> list[Point]:
+def read_points(points_file):
     lines = points_file.read_text(encoding="utf-8", errors="ignore").splitlines()
     n_points, count_i = _next_count(lines)
 
-    points: list[Point] = []
+    points = []
     pattern = re.compile(r"\(\s*([^()\s]+)\s+([^()\s]+)\s+([^()\s]+)\s*\)")
 
-    for line in lines[count_i + 1 :]:
+    for line in lines[count_i + 1:]:
         match = pattern.search(line)
         if not match:
             continue
-        points.append(Point(*(float(value) for value in match.groups())))
+        values = [float(value) for value in match.groups()]
+        points.append(Point(values[0], values[1], values[2]))
         if len(points) == n_points:
             break
 
     if len(points) != n_points:
-        raise ValueError(f"Expected {n_points} points, read {len(points)}")
+        raise ValueError("Expected {} points, read {}".format(n_points, len(points)))
 
     return points
 
 
-def read_faces(faces_file: Path) -> list[list[int]]:
+def read_faces(faces_file):
     lines = faces_file.read_text(encoding="utf-8", errors="ignore").splitlines()
     n_faces, count_i = _next_count(lines)
 
-    faces: list[list[int]] = []
+    faces = []
     pattern = re.compile(r"\s*\d+\(([^()]*)\)")
 
-    for line in lines[count_i + 1 :]:
+    for line in lines[count_i + 1:]:
         match = pattern.match(line)
         if not match:
             continue
@@ -104,14 +105,14 @@ def read_faces(faces_file: Path) -> list[list[int]]:
             break
 
     if len(faces) != n_faces:
-        raise ValueError(f"Expected {n_faces} faces, read {len(faces)}")
+        raise ValueError("Expected {} faces, read {}".format(n_faces, len(faces)))
 
     return faces
 
 
-def read_boundary(boundary_file: Path) -> list[PatchInfo]:
+def read_boundary(boundary_file):
     lines = boundary_file.read_text(encoding="utf-8", errors="ignore").splitlines()
-    patches: list[PatchInfo] = []
+    patches = []
 
     i = 0
     while i < len(lines):
@@ -124,7 +125,7 @@ def read_boundary(boundary_file: Path) -> list[PatchInfo]:
             i += 1
             continue
 
-        block_lines: list[str] = []
+        block_lines = []
         depth = 0
         for j in range(i + 1, len(lines)):
             text = lines[j]
@@ -151,22 +152,22 @@ def read_boundary(boundary_file: Path) -> list[PatchInfo]:
     return patches
 
 
-def patch_points(case_dir: Path, patch_pattern: str) -> dict[str, list[Point]]:
+def patch_points(case_dir, patch_pattern):
     poly_mesh = case_dir / "constant" / "polyMesh"
     points = read_points(poly_mesh / "points")
     faces = read_faces(poly_mesh / "faces")
     patches = read_boundary(poly_mesh / "boundary")
     pattern = re.compile(patch_pattern)
 
-    selected: dict[str, list[Point]] = {}
+    selected = {}
     for patch in patches:
         if not pattern.fullmatch(patch.name):
             continue
 
-        point_labels: list[int] = []
-        seen: set[int] = set()
+        point_labels = []
+        seen = set()
 
-        for face in faces[patch.start_face : patch.start_face + patch.n_faces]:
+        for face in faces[patch.start_face:patch.start_face + patch.n_faces]:
             for point_label in face:
                 if point_label not in seen:
                     seen.add(point_label)
@@ -176,19 +177,19 @@ def patch_points(case_dir: Path, patch_pattern: str) -> dict[str, list[Point]]:
 
     if not selected:
         names = ", ".join(patch.name for patch in patches)
-        raise ValueError(f"No patches matched {patch_pattern!r}. Available patches: {names}")
+        raise ValueError("No patches matched {!r}. Available patches: {}".format(patch_pattern, names))
 
     return selected
 
 
-def read_fem_csv(path: Path) -> list[FemNode]:
-    nodes: list[FemNode] = []
+def read_fem_csv(path):
+    nodes = []
     with path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(row for row in handle if not row.lstrip().startswith("#"))
         required = {"nodeId", "x", "y", "z", "phi_x", "phi_y", "phi_z"}
         missing = required.difference(reader.fieldnames or [])
         if missing:
-            raise ValueError(f"{path} missing columns: {', '.join(sorted(missing))}")
+            raise ValueError("{} missing columns: {}".format(path, ", ".join(sorted(missing))))
 
         for row in reader:
             nodes.append(
@@ -200,24 +201,24 @@ def read_fem_csv(path: Path) -> list[FemNode]:
             )
 
     if not nodes:
-        raise ValueError(f"No FEM nodes found in {path}")
+        raise ValueError("No FEM nodes found in {}".format(path))
 
     return nodes
 
 
-def dot(a: Point, b: Point) -> float:
+def dot(a, b):
     return a.x * b.x + a.y * b.y + a.z * b.z
 
 
-def mag(a: Point) -> float:
+def mag(a):
     return math.sqrt(dot(a, a))
 
 
-def distance2(a: Point, b: Point) -> float:
+def distance2(a, b):
     return (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2
 
 
-def coordinate(point: Point, axis: int) -> float:
+def coordinate(point, axis):
     if axis == 0:
         return point.x
     if axis == 1:
@@ -225,7 +226,7 @@ def coordinate(point: Point, axis: int) -> float:
     return point.z
 
 
-def build_kd_tree(nodes: list[FemNode], depth: int = 0) -> KdNode | None:
+def build_kd_tree(nodes, depth=0):
     if not nodes:
         return None
 
@@ -236,16 +237,11 @@ def build_kd_tree(nodes: list[FemNode], depth: int = 0) -> KdNode | None:
         item=nodes[mid],
         axis=axis,
         left=build_kd_tree(nodes[:mid], depth + 1),
-        right=build_kd_tree(nodes[mid + 1 :], depth + 1),
+        right=build_kd_tree(nodes[mid + 1:], depth + 1),
     )
 
 
-def nearest_in_kd_tree(
-    target: Point,
-    tree: KdNode | None,
-    best: FemNode | None,
-    best_distance2: float,
-) -> tuple[FemNode | None, float]:
+def nearest_in_kd_tree(target, tree, best, best_distance2):
     if tree is None:
         return best, best_distance2
 
@@ -265,45 +261,36 @@ def nearest_in_kd_tree(
     return best, best_distance2
 
 
-def normalize(a: Point) -> Point:
+def normalize(a):
     length = mag(a)
     if length <= 0:
         raise ValueError("Cannot normalize zero vector")
     return a.scale(1.0 / length)
 
 
-def radial_distance(point: Point, origin: Point, axis: Point) -> float:
+def radial_distance(point, origin, axis):
     rel = point - origin
     axial = axis.scale(dot(rel, axis))
     radial = rel - axial
     return mag(radial)
 
 
-def exact_key(point: Point, scale: float = 1.0e12) -> tuple[int, int, int]:
+def exact_key(point, scale=1.0e12):
     return (round(point.x * scale), round(point.y * scale), round(point.z * scale))
 
 
-def nearest_mode(
-    target: Point,
-    exact_index: dict[tuple[int, int, int], FemNode],
-    kd_tree: KdNode | None,
-) -> tuple[FemNode, float]:
+def nearest_mode(target, exact_index, kd_tree):
     exact = exact_index.get(exact_key(target))
     if exact is not None:
         return exact, 0.0
 
-    best, best_distance2 = nearest_in_kd_tree(target, kd_tree, None, math.inf)
+    best, best_distance2 = nearest_in_kd_tree(target, kd_tree, None, float("inf"))
     if best is None:
         raise ValueError("Cannot map to an empty FEM mode")
     return best, math.sqrt(best_distance2)
 
 
-def write_sample_fem(
-    path: Path,
-    patches: dict[str, list[Point]],
-    origin: Point,
-    axis: Point,
-) -> None:
+def write_sample_fem(path, patches, origin, axis):
     all_points = [point for points in patches.values() for point in points]
     radii = [radial_distance(point, origin, axis) for point in all_points]
     r_min = min(radii)
@@ -322,23 +309,19 @@ def write_sample_fem(
                 shape = s * s * (3.0 - 2.0 * s)
                 writer.writerow(
                     [
-                        f"{patch_name}_{node_i}",
-                        f"{point.x:.12g}",
-                        f"{point.y:.12g}",
-                        f"{point.z:.12g}",
+                        "{}_{}".format(patch_name, node_i),
+                        "{:.12g}".format(point.x),
+                        "{:.12g}".format(point.y),
+                        "{:.12g}".format(point.z),
                         "0",
-                        f"{shape:.12g}",
+                        "{:.12g}".format(shape),
                         "0",
                     ]
                 )
                 node_i += 1
 
 
-def map_fem_to_patches(
-    fem_nodes: list[FemNode],
-    patches: dict[str, list[Point]],
-    output: Path,
-) -> None:
+def map_fem_to_patches(fem_nodes, patches, output):
     output.parent.mkdir(parents=True, exist_ok=True)
     exact_index = {exact_key(node.point): node for node in fem_nodes}
     kd_tree = build_kd_tree(fem_nodes)
@@ -371,29 +354,29 @@ def map_fem_to_patches(
                     [
                         patch_name,
                         i,
-                        f"{point.x:.12g}",
-                        f"{point.y:.12g}",
-                        f"{point.z:.12g}",
-                        f"{node.phi.x:.12g}",
-                        f"{node.phi.y:.12g}",
-                        f"{node.phi.z:.12g}",
+                        "{:.12g}".format(point.x),
+                        "{:.12g}".format(point.y),
+                        "{:.12g}".format(point.z),
+                        "{:.12g}".format(node.phi.x),
+                        "{:.12g}".format(node.phi.y),
+                        "{:.12g}".format(node.phi.z),
                         node.node_id,
-                        f"{distance:.12g}",
+                        "{:.12g}".format(distance),
                     ]
                 )
 
-    print(f"Mapped {row_count} patch points across {len(patches)} patches -> {output}")
-    print(f"Maximum nearest-node distance: {max_distance:.6g}")
+    print("Mapped {} patch points across {} patches -> {}".format(row_count, len(patches), output))
+    print("Maximum nearest-node distance: {:.6g}".format(max_distance))
 
 
-def parse_vector(text: str) -> Point:
+def parse_vector(text):
     values = [float(value) for value in text.strip("()").replace(",", " ").split()]
     if len(values) != 3:
-        raise ValueError(f"Expected three vector components, got {text!r}")
-    return Point(*values)
+        raise ValueError("Expected three vector components, got {!r}".format(text))
+    return Point(values[0], values[1], values[2])
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", required=True, type=Path, help="OpenFOAM case directory")
     parser.add_argument("--patch-regex", default="propeller.*", help="Patch regex to map")
@@ -414,7 +397,7 @@ def main() -> None:
 
     if args.make_sample_fem:
         write_sample_fem(args.fem, patches, origin, axis)
-        print(f"Wrote sample FEM mode -> {args.fem}")
+        print("Wrote sample FEM mode -> {}".format(args.fem))
 
     fem_nodes = read_fem_csv(args.fem)
     map_fem_to_patches(fem_nodes, patches, args.out)

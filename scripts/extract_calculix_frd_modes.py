@@ -15,35 +15,33 @@ Each mode CSV has the format expected by map_fem_mode_to_patches.py:
 The FRD format uses fixed-width numeric fields in many places, so this parser
 does not split displacement rows on whitespace. This matters when negative
 values are adjacent to node ids or previous components.
-"""
 
-from __future__ import annotations
+This script intentionally avoids newer Python syntax such as dataclasses,
+variable annotations, built-in generic type hints, and f-strings, because some
+HPC/server environments still provide an older python3 command.
+"""
 
 import argparse
 import csv
 import math
 import re
-from dataclasses import dataclass
 from pathlib import Path
 
 
-@dataclass(frozen=True)
-class Node:
-    node_id: int
-    x: float
-    y: float
-    z: float
+class Node(object):
+    def __init__(self, node_id, x, y, z):
+        self.node_id = node_id
+        self.x = x
+        self.y = y
+        self.z = z
 
 
-Vector = tuple[float, float, float]
-
-
-def parse_float(text: str) -> float:
+def parse_float(text):
     return float(text.strip().replace("D", "E").replace("d", "e"))
 
 
-def parse_vector_row(line: str) -> tuple[int, Vector]:
-    """Parse an FRD row containing one node id followed by three vectors."""
+def parse_vector_row(line):
+    """Parse an FRD row containing one node id followed by three values."""
     node_id = int(line[3:13])
     return (
         node_id,
@@ -55,11 +53,11 @@ def parse_vector_row(line: str) -> tuple[int, Vector]:
     )
 
 
-def parse_modes_arg(text: str | None) -> set[int] | None:
+def parse_modes_arg(text):
     if not text:
         return None
 
-    modes: set[int] = set()
+    modes = set()
     for item in text.replace(";", ",").split(","):
         item = item.strip()
         if not item:
@@ -71,7 +69,7 @@ def parse_modes_arg(text: str | None) -> set[int] | None:
     return modes
 
 
-def c3d10_surface_face_nodes(connectivity: list[int]) -> list[tuple[tuple[int, int, int], tuple[int, ...]]]:
+def c3d10_surface_face_nodes(connectivity):
     """Return C3D10 faces keyed by their three corner nodes.
 
     CalculiX/Abaqus C3D10 node order:
@@ -92,7 +90,7 @@ def c3d10_surface_face_nodes(connectivity: list[int]) -> list[tuple[tuple[int, i
     return [(tuple(sorted(face[:3])), face) for face in faces]
 
 
-def c3d10_faces_by_name(connectivity: list[int]) -> dict[str, tuple[int, ...]]:
+def c3d10_faces_by_name(connectivity):
     if len(connectivity) < 10:
         raise ValueError("C3D10 element requires 10 node ids")
 
@@ -105,11 +103,11 @@ def c3d10_faces_by_name(connectivity: list[int]) -> dict[str, tuple[int, ...]]:
     }
 
 
-def parse_keyword(line: str) -> tuple[str, dict[str, str], set[str]]:
+def parse_keyword(line):
     parts = [part.strip() for part in line.strip()[1:].split(",")]
     keyword = parts[0].upper()
-    params: dict[str, str] = {}
-    flags: set[str] = set()
+    params = {}
+    flags = set()
 
     for part in parts[1:]:
         if not part:
@@ -123,8 +121,8 @@ def parse_keyword(line: str) -> tuple[str, dict[str, str], set[str]]:
     return keyword, params, flags
 
 
-def parse_int_tokens(line: str) -> list[int]:
-    values: list[int] = []
+def parse_int_tokens(line):
+    values = []
     for token in line.replace(",", " ").split():
         try:
             values.append(int(token))
@@ -133,8 +131,8 @@ def parse_int_tokens(line: str) -> list[int]:
     return values
 
 
-def expand_generate(values: list[int]) -> list[int]:
-    expanded: list[int] = []
+def expand_generate(values):
+    expanded = []
     if len(values) % 3:
         raise ValueError("Generated set entries must be start,end,step triples")
 
@@ -146,24 +144,20 @@ def expand_generate(values: list[int]) -> list[int]:
     return expanded
 
 
-def read_inp_node_selection(
-    inp_path: Path,
-    surface_regex: str | None,
-    nset_regex: str | None,
-) -> tuple[set[int], list[str]]:
+def read_inp_node_selection(inp_path, surface_regex, nset_regex):
     """Read named node selections from a CalculiX/PrePoMax input file."""
     surface_pattern = re.compile(surface_regex) if surface_regex else None
     nset_pattern = re.compile(nset_regex) if nset_regex else None
 
-    elements: dict[int, list[int]] = {}
-    elsets: dict[str, set[int]] = {}
-    nsets: dict[str, set[int]] = {}
-    surfaces: dict[str, list[tuple[str, str]]] = {}
+    elements = {}
+    elsets = {}
+    nsets = {}
+    surfaces = {}
 
-    section: str | None = None
-    section_name: str | None = None
+    section = None
+    section_name = None
     section_generate = False
-    element_elset: str | None = None
+    element_elset = None
 
     with inp_path.open(encoding="utf-8", errors="ignore") as handle:
         for raw_line in handle:
@@ -228,53 +222,56 @@ def read_inp_node_selection(
                 if len(parts) >= 2:
                     surfaces[section_name].append((parts[0], parts[1].upper()))
 
-    selected_nodes: set[int] = set()
-    selected_names: list[str] = []
+    selected_nodes = set()
+    selected_names = []
 
     if nset_pattern:
         for name, node_ids in sorted(nsets.items()):
             if nset_pattern.fullmatch(name):
                 selected_nodes.update(node_ids)
-                selected_names.append(f"NSET:{name}")
+                selected_names.append("NSET:{}".format(name))
 
     if surface_pattern:
         for name, refs in sorted(surfaces.items()):
             if not surface_pattern.fullmatch(name):
                 continue
 
-            selected_names.append(f"SURFACE:{name}")
+            selected_names.append("SURFACE:{}".format(name))
             for elset_name, face_name in refs:
                 element_ids = elsets.get(elset_name)
                 if element_ids is None:
-                    raise ValueError(f"Surface {name} references missing elset {elset_name}")
+                    raise ValueError(
+                        "Surface {} references missing elset {}".format(name, elset_name)
+                    )
 
                 for element_id in element_ids:
                     connectivity = elements.get(element_id)
                     if connectivity is None:
-                        raise ValueError(f"Surface {name} references missing element {element_id}")
+                        raise ValueError(
+                            "Surface {} references missing element {}".format(name, element_id)
+                        )
 
                     faces = c3d10_faces_by_name(connectivity)
                     if face_name not in faces:
-                        raise ValueError(f"Unsupported C3D10 face {face_name!r} in surface {name}")
+                        raise ValueError(
+                            "Unsupported C3D10 face {!r} in surface {}".format(face_name, name)
+                        )
                     selected_nodes.update(faces[face_name])
 
     if not selected_nodes:
         selectors = []
         if surface_regex:
-            selectors.append(f"surface_regex={surface_regex!r}")
+            selectors.append("surface_regex={!r}".format(surface_regex))
         if nset_regex:
-            selectors.append(f"nset_regex={nset_regex!r}")
-        raise ValueError(f"No nodes matched {', '.join(selectors)} in {inp_path}")
+            selectors.append("nset_regex={!r}".format(nset_regex))
+        raise ValueError(
+            "No nodes matched {} in {}".format(", ".join(selectors), inp_path)
+        )
 
     return selected_nodes, selected_names
 
 
-def add_element_faces(
-    element_type: int,
-    connectivity: list[int],
-    face_counts: dict[tuple[int, int, int], int],
-    face_nodes: dict[tuple[int, int, int], tuple[int, ...]],
-) -> None:
+def add_element_faces(element_type, connectivity, face_counts, face_nodes):
     # FRD type 6 is the C3D10 tetrahedron used by the current PrePoMax model.
     if element_type != 6:
         return
@@ -284,40 +281,32 @@ def add_element_faces(
         face_nodes.setdefault(key, face)
 
 
-def surface_node_set(
-    face_counts: dict[tuple[int, int, int], int],
-    face_nodes: dict[tuple[int, int, int], tuple[int, ...]],
-) -> set[int]:
-    nodes: set[int] = set()
+def surface_node_set(face_counts, face_nodes):
+    nodes = set()
     for key, count in face_counts.items():
         if count == 1:
             nodes.update(face_nodes[key])
     return nodes
 
 
-def normalize_values(values: dict[int, Vector], mode: str) -> dict[int, Vector]:
+def normalize_values(values, mode):
     if mode == "none":
         return values
 
     if mode != "max":
-        raise ValueError(f"Unsupported normalization mode: {mode}")
+        raise ValueError("Unsupported normalization mode: {}".format(mode))
 
     max_mag = max(math.sqrt(x * x + y * y + z * z) for x, y, z in values.values())
     if max_mag <= 0:
         raise ValueError("Cannot normalize a mode with zero displacement magnitude")
 
-    return {
-        node_id: (x / max_mag, y / max_mag, z / max_mag)
+    return dict(
+        (node_id, (x / max_mag, y / max_mag, z / max_mag))
         for node_id, (x, y, z) in values.items()
-    }
+    )
 
 
-def write_mode_csv(
-    path: Path,
-    nodes: dict[int, Node],
-    values: dict[int, Vector],
-    normalization: str,
-) -> None:
+def write_mode_csv(path, nodes, values, normalization):
     path.parent.mkdir(parents=True, exist_ok=True)
     values = normalize_values(values, normalization)
 
@@ -330,42 +319,42 @@ def write_mode_csv(
             writer.writerow(
                 [
                     node_id,
-                    f"{node.x:.12g}",
-                    f"{node.y:.12g}",
-                    f"{node.z:.12g}",
-                    f"{phi[0]:.12g}",
-                    f"{phi[1]:.12g}",
-                    f"{phi[2]:.12g}",
+                    "{:.12g}".format(node.x),
+                    "{:.12g}".format(node.y),
+                    "{:.12g}".format(node.z),
+                    "{:.12g}".format(phi[0]),
+                    "{:.12g}".format(phi[1]),
+                    "{:.12g}".format(phi[2]),
                 ]
             )
 
 
-def write_frequency_csv(path: Path, frequencies: dict[int, float]) -> None:
+def write_frequency_csv(path, frequencies):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["mode", "frequency_Hz"])
         for mode_id in sorted(frequencies):
-            writer.writerow([mode_id, f"{frequencies[mode_id]:.12g}"])
+            writer.writerow([mode_id, "{:.12g}".format(frequencies[mode_id])])
 
 
 def extract_frd_modes(
-    frd_path: Path,
-    out_dir: Path,
-    normalization: str,
-    selected_modes: set[int] | None,
-    surface_only: bool,
-    inp_path: Path | None,
-    surface_regex: str | None,
-    nset_regex: str | None,
-) -> None:
-    nodes: dict[int, Node] = {}
-    frequencies: dict[int, float] = {}
+    frd_path,
+    out_dir,
+    normalization,
+    selected_modes,
+    surface_only,
+    inp_path,
+    surface_regex,
+    nset_regex,
+):
+    nodes = {}
+    frequencies = {}
 
-    face_counts: dict[tuple[int, int, int], int] = {}
-    face_nodes: dict[tuple[int, int, int], tuple[int, ...]] = {}
-    selected_node_ids: set[int] | None = None
-    selected_names: list[str] = []
+    face_counts = {}
+    face_nodes = {}
+    selected_node_ids = None
+    selected_names = []
 
     if inp_path and (surface_regex or nset_regex):
         selected_node_ids, selected_names = read_inp_node_selection(
@@ -377,15 +366,15 @@ def extract_frd_modes(
     reading_nodes = False
     reading_elements = False
     reading_disp = False
-    current_element_type: int | None = None
-    current_mode: int | None = None
-    current_frequency: float | None = None
-    current_values: dict[int, Vector] = {}
+    current_element_type = None
+    current_mode = None
+    current_frequency = None
+    current_values = {}
 
-    def wanted_mode(mode_id: int | None) -> bool:
+    def wanted_mode(mode_id):
         return mode_id is not None and (selected_modes is None or mode_id in selected_modes)
 
-    def ensure_surface_nodes() -> set[int] | None:
+    def ensure_surface_nodes():
         nonlocal selected_node_ids
         if selected_node_ids is not None:
             return selected_node_ids
@@ -394,10 +383,12 @@ def extract_frd_modes(
         if selected_node_ids is None:
             selected_node_ids = surface_node_set(face_counts, face_nodes)
             if not selected_node_ids:
-                raise ValueError("Could not identify any exterior C3D10 surface nodes in the FRD file")
+                raise ValueError(
+                    "Could not identify any exterior C3D10 surface nodes in the FRD file"
+                )
         return selected_node_ids
 
-    def finish_disp_block() -> None:
+    def finish_disp_block():
         nonlocal reading_disp, current_values
         if not reading_disp:
             return
@@ -405,7 +396,7 @@ def extract_frd_modes(
             raise ValueError("DISP block ended without a PMODE header")
         if current_values:
             write_mode_csv(
-                out_dir / f"mode_{current_mode:02d}.csv",
+                out_dir / "mode_{:02d}.csv".format(current_mode),
                 nodes,
                 current_values,
                 normalization,
@@ -413,8 +404,9 @@ def extract_frd_modes(
             if current_frequency is not None:
                 frequencies[current_mode] = current_frequency
             print(
-                f"Wrote mode_{current_mode:02d}.csv "
-                f"({len(current_values)} nodes, frequency={current_frequency:g} Hz)"
+                "Wrote mode_{:02d}.csv ({} nodes, frequency={:g} Hz)".format(
+                    current_mode, len(current_values), current_frequency
+                )
             )
         current_values = {}
         reading_disp = False
@@ -485,24 +477,32 @@ def extract_frd_modes(
                     node_id, phi = parse_vector_row(line)
                     if selected_node_ids is None or node_id in selected_node_ids:
                         if node_id not in nodes:
-                            raise ValueError(f"Mode references node {node_id}, but no coordinates were read")
+                            raise ValueError(
+                                "Mode references node {}, but no coordinates were read".format(
+                                    node_id
+                                )
+                            )
                         current_values[node_id] = phi
 
     finish_disp_block()
     write_frequency_csv(out_dir / "mode_frequencies.csv", frequencies)
 
     if not frequencies:
-        raise ValueError(f"No modal displacement blocks found in {frd_path}")
+        raise ValueError("No modal displacement blocks found in {}".format(frd_path))
 
-    print(f"Wrote frequencies -> {out_dir / 'mode_frequencies.csv'}")
-    print(f"Read {len(nodes)} FRD nodes from {frd_path}")
+    print("Wrote frequencies -> {}".format(out_dir / "mode_frequencies.csv"))
+    print("Read {} FRD nodes from {}".format(len(nodes), frd_path))
     if selected_names:
-        print(f"Used {len(selected_node_ids or [])} named INP nodes from: {', '.join(selected_names)}")
+        print(
+            "Used {} named INP nodes from: {}".format(
+                len(selected_node_ids or []), ", ".join(selected_names)
+            )
+        )
     elif surface_only and selected_node_ids is not None:
-        print(f"Used {len(selected_node_ids)} exterior surface nodes")
+        print("Used {} exterior surface nodes".format(len(selected_node_ids)))
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--frd", required=True, type=Path, help="CalculiX FRD result file")
     parser.add_argument("--out-dir", required=True, type=Path, help="Output mode CSV directory")

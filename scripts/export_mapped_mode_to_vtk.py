@@ -7,55 +7,55 @@ Input mapped CSV columns:
 The output VTK file uses deformed coordinates:
     x_view = x + scale * phi
 
-It also stores the modal vector `phi`, its magnitude, and the original point
-coordinates as point data so ParaView can inspect either the original or
-scaled shape.
-"""
+It also stores the modal vector phi, its magnitude, and the original point
+coordinates as point data so ParaView can inspect either the original or scaled
+shape.
 
-from __future__ import annotations
+This script intentionally avoids newer Python syntax so it can run on older
+server python3 installations.
+"""
 
 import argparse
 import csv
 import math
 import re
-from dataclasses import dataclass
 from pathlib import Path
 
 
-@dataclass(frozen=True)
-class Point:
-    x: float
-    y: float
-    z: float
+class Point(object):
+    def __init__(self, x, y, z):
+        self.x = x
+        self.y = y
+        self.z = z
 
-    def __add__(self, other: "Point") -> "Point":
+    def __add__(self, other):
         return Point(self.x + other.x, self.y + other.y, self.z + other.z)
 
-    def scale(self, value: float) -> "Point":
+    def scale(self, value):
         return Point(self.x * value, self.y * value, self.z * value)
 
 
-@dataclass(frozen=True)
-class PatchInfo:
-    name: str
-    n_faces: int
-    start_face: int
+class PatchInfo(object):
+    def __init__(self, name, n_faces, start_face):
+        self.name = name
+        self.n_faces = n_faces
+        self.start_face = start_face
 
 
-@dataclass(frozen=True)
-class PatchTopology:
-    point_labels: list[int]
-    faces: list[list[int]]
-    points: list[Point]
+class PatchTopology(object):
+    def __init__(self, point_labels, faces, points):
+        self.point_labels = point_labels
+        self.faces = faces
+        self.points = points
 
 
-@dataclass(frozen=True)
-class MappedMode:
-    point: Point
-    phi: Point
+class MappedMode(object):
+    def __init__(self, point, phi):
+        self.point = point
+        self.phi = phi
 
 
-def _next_count(lines: list[str], start: int = 0) -> tuple[int, int]:
+def _next_count(lines, start=0):
     for i in range(start, len(lines)):
         text = lines[i].strip()
         if text.isdigit():
@@ -63,35 +63,36 @@ def _next_count(lines: list[str], start: int = 0) -> tuple[int, int]:
     raise ValueError("Could not find OpenFOAM list count")
 
 
-def read_points(points_file: Path) -> list[Point]:
+def read_points(points_file):
     lines = points_file.read_text(encoding="utf-8", errors="ignore").splitlines()
     n_points, count_i = _next_count(lines)
 
-    points: list[Point] = []
+    points = []
     pattern = re.compile(r"\(\s*([^()\s]+)\s+([^()\s]+)\s+([^()\s]+)\s*\)")
 
-    for line in lines[count_i + 1 :]:
+    for line in lines[count_i + 1:]:
         match = pattern.search(line)
         if not match:
             continue
-        points.append(Point(*(float(value) for value in match.groups())))
+        values = [float(value) for value in match.groups()]
+        points.append(Point(values[0], values[1], values[2]))
         if len(points) == n_points:
             break
 
     if len(points) != n_points:
-        raise ValueError(f"Expected {n_points} points, read {len(points)}")
+        raise ValueError("Expected {} points, read {}".format(n_points, len(points)))
 
     return points
 
 
-def read_faces(faces_file: Path) -> list[list[int]]:
+def read_faces(faces_file):
     lines = faces_file.read_text(encoding="utf-8", errors="ignore").splitlines()
     n_faces, count_i = _next_count(lines)
 
-    faces: list[list[int]] = []
+    faces = []
     pattern = re.compile(r"\s*\d+\(([^()]*)\)")
 
-    for line in lines[count_i + 1 :]:
+    for line in lines[count_i + 1:]:
         match = pattern.match(line)
         if not match:
             continue
@@ -100,14 +101,14 @@ def read_faces(faces_file: Path) -> list[list[int]]:
             break
 
     if len(faces) != n_faces:
-        raise ValueError(f"Expected {n_faces} faces, read {len(faces)}")
+        raise ValueError("Expected {} faces, read {}".format(n_faces, len(faces)))
 
     return faces
 
 
-def read_boundary(boundary_file: Path) -> list[PatchInfo]:
+def read_boundary(boundary_file):
     lines = boundary_file.read_text(encoding="utf-8", errors="ignore").splitlines()
-    patches: list[PatchInfo] = []
+    patches = []
 
     i = 0
     while i < len(lines):
@@ -120,7 +121,7 @@ def read_boundary(boundary_file: Path) -> list[PatchInfo]:
             i += 1
             continue
 
-        block_lines: list[str] = []
+        block_lines = []
         depth = 0
         for j in range(i + 1, len(lines)):
             text = lines[j]
@@ -147,24 +148,24 @@ def read_boundary(boundary_file: Path) -> list[PatchInfo]:
     return patches
 
 
-def selected_patch_topology(case_dir: Path, patch_regex: str) -> dict[str, PatchTopology]:
+def selected_patch_topology(case_dir, patch_regex):
     poly_mesh = case_dir / "constant" / "polyMesh"
     points = read_points(poly_mesh / "points")
     faces = read_faces(poly_mesh / "faces")
     patches = read_boundary(poly_mesh / "boundary")
     pattern = re.compile(patch_regex)
 
-    selected: dict[str, PatchTopology] = {}
+    selected = {}
     for patch in patches:
         if not pattern.fullmatch(patch.name):
             continue
 
-        point_labels: list[int] = []
-        label_to_local: dict[int, int] = {}
-        local_faces: list[list[int]] = []
+        point_labels = []
+        label_to_local = {}
+        local_faces = []
 
-        for face in faces[patch.start_face : patch.start_face + patch.n_faces]:
-            local_face: list[int] = []
+        for face in faces[patch.start_face:patch.start_face + patch.n_faces]:
+            local_face = []
             for point_label in face:
                 if point_label not in label_to_local:
                     label_to_local[point_label] = len(point_labels)
@@ -180,19 +181,19 @@ def selected_patch_topology(case_dir: Path, patch_regex: str) -> dict[str, Patch
 
     if not selected:
         names = ", ".join(patch.name for patch in patches)
-        raise ValueError(f"No patches matched {patch_regex!r}. Available patches: {names}")
+        raise ValueError("No patches matched {!r}. Available patches: {}".format(patch_regex, names))
 
     return selected
 
 
-def read_mapped_mode(path: Path) -> dict[tuple[str, int], MappedMode]:
-    values: dict[tuple[str, int], MappedMode] = {}
+def read_mapped_mode(path):
+    values = {}
     with path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(row for row in handle if not row.lstrip().startswith("#"))
         required = {"patchName", "patchPointI", "x", "y", "z", "phi_x", "phi_y", "phi_z"}
         missing = required.difference(reader.fieldnames or [])
         if missing:
-            raise ValueError(f"{path} missing columns: {', '.join(sorted(missing))}")
+            raise ValueError("{} missing columns: {}".format(path, ", ".join(sorted(missing))))
 
         for row in reader:
             key = (row["patchName"], int(row["patchPointI"]))
@@ -202,29 +203,24 @@ def read_mapped_mode(path: Path) -> dict[tuple[str, int], MappedMode]:
             )
 
     if not values:
-        raise ValueError(f"No mapped mode rows found in {path}")
+        raise ValueError("No mapped mode rows found in {}".format(path))
 
     return values
 
 
-def magnitude(point: Point) -> float:
+def magnitude(point):
     return math.sqrt(point.x * point.x + point.y * point.y + point.z * point.z)
 
 
-def write_vtk(
-    path: Path,
-    topology_by_patch: dict[str, PatchTopology],
-    mapped_mode: dict[tuple[str, int], MappedMode],
-    scale: float,
-) -> None:
+def write_vtk(path, topology_by_patch, mapped_mode, scale):
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    vtk_points: list[Point] = []
-    original_points: list[Point] = []
-    phis: list[Point] = []
-    polygons: list[list[int]] = []
-    patch_ids: list[int] = []
-    patch_names: list[str] = []
+    vtk_points = []
+    original_points = []
+    phis = []
+    polygons = []
+    patch_ids = []
+    patch_names = []
 
     offset = 0
     for patch_id, patch_name in enumerate(sorted(topology_by_patch)):
@@ -257,46 +253,46 @@ def write_vtk(
         handle.write("Demo3 mapped FEM mode\n")
         handle.write("ASCII\n")
         handle.write("DATASET POLYDATA\n")
-        handle.write(f"FIELD FieldData {len(patch_names)}\n")
+        handle.write("FIELD FieldData {}\n".format(len(patch_names)))
         for patch_id, patch_name in enumerate(patch_names):
-            handle.write(f"patch_{patch_id} 1 {len(patch_name)} char\n")
+            handle.write("patch_{} 1 {} char\n".format(patch_id, len(patch_name)))
             handle.write(" ".join(str(ord(char)) for char in patch_name) + "\n")
 
-        handle.write(f"POINTS {len(vtk_points)} double\n")
+        handle.write("POINTS {} double\n".format(len(vtk_points)))
         for point in vtk_points:
-            handle.write(f"{point.x:.12g} {point.y:.12g} {point.z:.12g}\n")
+            handle.write("{:.12g} {:.12g} {:.12g}\n".format(point.x, point.y, point.z))
 
-        handle.write(f"POLYGONS {len(polygons)} {polygon_size}\n")
+        handle.write("POLYGONS {} {}\n".format(len(polygons), polygon_size))
         for face in polygons:
-            handle.write(f"{len(face)} " + " ".join(str(point_i) for point_i in face) + "\n")
+            handle.write("{} ".format(len(face)) + " ".join(str(point_i) for point_i in face) + "\n")
 
-        handle.write(f"POINT_DATA {len(vtk_points)}\n")
+        handle.write("POINT_DATA {}\n".format(len(vtk_points)))
         handle.write("VECTORS phi double\n")
         for phi in phis:
-            handle.write(f"{phi.x:.12g} {phi.y:.12g} {phi.z:.12g}\n")
+            handle.write("{:.12g} {:.12g} {:.12g}\n".format(phi.x, phi.y, phi.z))
 
         handle.write("VECTORS originalPosition double\n")
         for point in original_points:
-            handle.write(f"{point.x:.12g} {point.y:.12g} {point.z:.12g}\n")
+            handle.write("{:.12g} {:.12g} {:.12g}\n".format(point.x, point.y, point.z))
 
         handle.write("SCALARS phiMag double 1\n")
         handle.write("LOOKUP_TABLE default\n")
         for phi in phis:
-            handle.write(f"{magnitude(phi):.12g}\n")
+            handle.write("{:.12g}\n".format(magnitude(phi)))
 
-        handle.write(f"CELL_DATA {len(polygons)}\n")
+        handle.write("CELL_DATA {}\n".format(len(polygons)))
         handle.write("SCALARS patchId int 1\n")
         handle.write("LOOKUP_TABLE default\n")
         for patch_id in patch_ids:
-            handle.write(f"{patch_id}\n")
+            handle.write("{}\n".format(patch_id))
 
-    print(f"Wrote VTK mode view: {path}")
-    print(f"Points: {len(vtk_points)}")
-    print(f"Polygons: {len(polygons)}")
-    print(f"Scale: {scale:g}")
+    print("Wrote VTK mode view: {}".format(path))
+    print("Points: {}".format(len(vtk_points)))
+    print("Polygons: {}".format(len(polygons)))
+    print("Scale: {:g}".format(scale))
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", required=True, type=Path, help="OpenFOAM case directory")
     parser.add_argument("--patch-regex", default="blade.*", help="Patch regex to export")
