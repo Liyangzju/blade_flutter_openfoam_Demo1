@@ -1,67 +1,141 @@
 #!/bin/sh
+
+# 无论用户从哪里启动脚本，都先切换到 demo3 算例目录。
+# $0 是脚本路径；${0%/*} 表示去掉最后的文件名，只保留目录。
 cd "${0%/*}" || exit
+
+# 加载 OpenFOAM 的运行辅助函数，例如 runApplication、runParallel、
+# notTest 和 getApplication。WM_PROJECT_DIR 由 OpenFOAM 环境脚本设置。
 . ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions
 
+# notTest 是 OpenFOAM tutorial 常用判断函数。
+# 正常运行时会进入这个 if；特殊测试模式下可能跳过正式求解。
 if notTest "$@"
 then
-    calcDir="fem/calculix"
-    jobName="six_blade_shell_modal"
-    modeDir="fem/surface_modes"
-    shellThickness="${SHELL_THICKNESS:-1e-5}"
-    minShellArea="${MIN_SHELL_AREA:-1e-8}"
+    # Shell 默认值写法：
+    #   ${NAME:-default}
+    # 含义是：如果 NAME 已设置且非空，就用 NAME；否则用 default。
+    #
+    # 这些变量都可以在运行 ./Allrun 前手动指定：
+    # PREPOMAX_DIR、PREPOMAX_FRD、PREPOMAX_INP、MODE_DIR、MODE、
+    # SELECT_MODE、EXTRACT_MODES、FEM_SURFACE_REGEX。
+    prepomaxDir="${PREPOMAX_DIR:-fem/prepomax}"
+    frdFile="${PREPOMAX_FRD:-${prepomaxDir}/Analysis-1.frd}"
+    inpFile="${PREPOMAX_INP:-${prepomaxDir}/Analysis-1.inp}"
+    femSurfaceRegex="${FEM_SURFACE_REGEX:-blade.*}"
+    modeDir="${MODE_DIR:-fem/structural_modes}"
+    # 默认为空，表示提取 FRD 中的全部模态。
+    # 如果运行 EXTRACT_MODES=10 ./Allrun，就只提取第 10 阶模态。
+    extractModes="${EXTRACT_MODES:-}"
+    modeRequest="${MODE:-${SELECT_MODE:-}}"
 
-    mkdir -p "$calcDir" "$modeDir" constant/modeShapes
-
-    runApplication foamFormatConvert
-
-    python3 ../scripts/build_calculix_shell_from_patches.py \
-        --case . \
-        --patch-regex 'blade.*|hub' \
-        --root-patch-regex 'hub' \
-        --out "${calcDir}/${jobName}.inp" \
-        --node-map "${calcDir}/six_blade_shell_nodes.csv" \
-        --modes 6 \
-        --origin '(0 0 0)' \
-        --axis '(0 0 1)' \
-        --root-ratio 0.08 \
-        --thickness "$shellThickness" \
-        --min-area "$minShellArea"
-
-    (
-        cd "$calcDir"
-        ccx "$jobName"
-    )
-
-    python3 ../scripts/extract_calculix_modes.py \
-        --dat "${calcDir}/${jobName}.dat" \
-        --node-map "${calcDir}/six_blade_shell_nodes.csv" \
-        --out-dir "$modeDir" \
-        --normalize max
-
-    cp "${modeDir}/mode_frequencies.csv" constant/modeShapes/mode_frequencies.csv
-
-    firstMode=$(awk -F, 'NR > 1 && $2 + 0 > 1e-9 {printf "%02d\n", $1; exit}' constant/modeShapes/mode_frequencies.csv)
-    firstFrequency=$(awk -F, 'NR > 1 && $2 + 0 > 1e-9 {print $2; exit}' constant/modeShapes/mode_frequencies.csv)
-
-    if [ -z "$firstMode" ] || [ -z "$firstFrequency" ]
+    # .frd 文件保存 CalculiX 的模态结果场。
+    # Demo3 会从这里读取 DISP 位移块，也就是模态振型。
+    if [ ! -f "$frdFile" ]
     then
-        echo "No positive CalculiX modal frequency found in constant/modeShapes/mode_frequencies.csv" >&2
+        echo "Missing PrePoMax/CalculiX result file: ${frdFile}" >&2
+        echo "Place Analysis-1.frd in fem/prepomax, or set PREPOMAX_FRD=/path/to/result.frd" >&2
         exit 1
     fi
 
+    # .inp 文件保存 PrePoMax 中命名的结构表面，例如 blade1 到 blade6。
+    # Demo3 用这些名称只提取叶片表面节点，避免把 hub 节点混进模态 CSV。
+    if [ ! -f "$inpFile" ]
+    then
+        echo "Missing PrePoMax/CalculiX input file with named surfaces: ${inpFile}" >&2
+        echo "Place Analysis-1.inp in fem/prepomax, or set PREPOMAX_INP=/path/to/model.inp" >&2
+        exit 1
+    fi
+
+    # 创建派生模态 CSV 和 OpenFOAM modeShapes 输出目录。
+    mkdir -p "$modeDir" constant/modeShapes
+
+    # 如果 OpenFOAM 字典或网格文件是二进制格式，这里先转成 ASCII。
+    # 后面的 Python 映射脚本按文本方式解析 OpenFOAM 文件。
+    runApplication foamFormatConvert
+
+    # 从 CalculiX FRD 提取模态向量：
+    #   .inp 提供命名 surface 列表，默认匹配 blade.*
+    #   .frd 提供节点坐标和模态 DISP 位移值
+    #   输出 mode_01.csv、mode_02.csv、...
+    #
+    # 如果设置 EXTRACT_MODES，就只提取指定阶次。例如：
+    #   EXTRACT_MODES=10 MODE=10 ./Allrun
+    if [ -n "$extractModes" ]
+    then
+        python3 ../scripts/extract_calculix_frd_modes.py \
+            --frd "$frdFile" \
+            --inp "$inpFile" \
+            --out-dir "$modeDir" \
+            --normalize max \
+            --surface-regex "$femSurfaceRegex" \
+            --modes "$extractModes"
+    else
+        python3 ../scripts/extract_calculix_frd_modes.py \
+            --frd "$frdFile" \
+            --inp "$inpFile" \
+            --out-dir "$modeDir" \
+            --normalize max \
+            --surface-regex "$femSurfaceRegex"
+    fi
+
+    # 将频率表复制到 OpenFOAM 的 modeShapes 目录，便于记录和后续检查。
+    cp "${modeDir}/mode_frequencies.csv" constant/modeShapes/mode_frequencies.csv
+
+    # 选择要映射到 OpenFOAM 的模态阶次。
+    # 如果设置了 MODE 或 SELECT_MODE，就使用指定阶次。
+    # 否则从 mode_frequencies.csv 中自动选择第一条正频率模态。
+    if [ -n "$modeRequest" ]
+    then
+        selectedMode=$(awk -v mode="$modeRequest" 'BEGIN {printf "%d\n", mode + 0}')
+    else
+        selectedMode=$(awk -F, 'NR > 1 && $2 + 0 > 1e-9 {print $1; exit}' constant/modeShapes/mode_frequencies.csv)
+    fi
+
+    # 将模态编号转成文件名使用的两位格式。
+    # 例如 7 -> 07，10 -> 10，对应 mode_07.csv、mode_10.csv。
+    selectedModePadded=$(awk -v mode="$selectedMode" 'BEGIN {printf "%02d\n", mode + 0}')
+
+    # 从频率表中读取所选模态的频率，稍后写入 modeProperties。
+    selectedFrequency=$(awk -F, -v mode="$selectedMode" 'NR > 1 && $1 + 0 == mode + 0 {print $2; exit}' constant/modeShapes/mode_frequencies.csv)
+
+    if [ -z "$selectedModePadded" ] || [ -z "$selectedFrequency" ]
+    then
+        echo "Could not select a valid mode from constant/modeShapes/mode_frequencies.csv" >&2
+        echo "Set MODE=<mode number> or SELECT_MODE=<mode number> if needed." >&2
+        exit 1
+    fi
+
+    # 这个 CSV 是 FEM 侧的结构模态输入，后面会映射到 OpenFOAM patch 点。
+    modeCsv="${modeDir}/mode_${selectedModePadded}.csv"
+    if [ ! -f "$modeCsv" ]
+    then
+        echo "Missing extracted mode CSV: ${modeCsv}" >&2
+        echo "Check EXTRACT_MODES, MODE, and SELECT_MODE settings." >&2
+        exit 1
+    fi
+
+    # 将 OpenFOAM 模态运动字典中的 frequency 更新为所选 PrePoMax 模态频率。
     foamDictionary \
         -entry frequency \
-        -set "$firstFrequency" \
+        -set "$selectedFrequency" \
         constant/modeShapes/modeProperties
 
+    # 将 FEM 叶片表面的模态向量映射到 OpenFOAM 的 blade.* patch 点。
+    # 生成的 bladeMode1_mapped.csv 会被 0/pointDisplacement 读取。
     python3 ../scripts/map_fem_mode_to_patches.py \
         --case . \
         --patch-regex 'blade.*' \
-        --fem "${modeDir}/mode_${firstMode}.csv" \
+        --fem "$modeCsv" \
         --out constant/modeShapes/bladeMode1_mapped.csv
 
+    echo "Selected PrePoMax mode ${selectedModePadded}, frequency ${selectedFrequency} Hz"
+
+    # 标准 OpenFOAM 并行运行流程：先分解网格。
     runApplication decomposePar
 
+    # coded pointDisplacement 边界条件会读取 constant/modeShapes 下的文件。
+    # 并行计算前，需要把这些文件复制到每个 processor 子算例中。
     for proc in processor*
     do
         [ -d "$proc/constant" ] && cp -rf constant/modeShapes "$proc/constant/"

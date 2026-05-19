@@ -45,6 +45,14 @@ class FemNode:
 
 
 @dataclass(frozen=True)
+class KdNode:
+    item: FemNode
+    axis: int
+    left: "KdNode | None"
+    right: "KdNode | None"
+
+
+@dataclass(frozen=True)
 class PatchInfo:
     name: str
     n_faces: int
@@ -209,6 +217,54 @@ def distance2(a: Point, b: Point) -> float:
     return (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2
 
 
+def coordinate(point: Point, axis: int) -> float:
+    if axis == 0:
+        return point.x
+    if axis == 1:
+        return point.y
+    return point.z
+
+
+def build_kd_tree(nodes: list[FemNode], depth: int = 0) -> KdNode | None:
+    if not nodes:
+        return None
+
+    axis = depth % 3
+    nodes = sorted(nodes, key=lambda node: coordinate(node.point, axis))
+    mid = len(nodes) // 2
+    return KdNode(
+        item=nodes[mid],
+        axis=axis,
+        left=build_kd_tree(nodes[:mid], depth + 1),
+        right=build_kd_tree(nodes[mid + 1 :], depth + 1),
+    )
+
+
+def nearest_in_kd_tree(
+    target: Point,
+    tree: KdNode | None,
+    best: FemNode | None,
+    best_distance2: float,
+) -> tuple[FemNode | None, float]:
+    if tree is None:
+        return best, best_distance2
+
+    item_distance2 = distance2(target, tree.item.point)
+    if item_distance2 < best_distance2:
+        best = tree.item
+        best_distance2 = item_distance2
+
+    diff = coordinate(target, tree.axis) - coordinate(tree.item.point, tree.axis)
+    near_branch = tree.left if diff < 0 else tree.right
+    far_branch = tree.right if diff < 0 else tree.left
+
+    best, best_distance2 = nearest_in_kd_tree(target, near_branch, best, best_distance2)
+    if diff * diff < best_distance2:
+        best, best_distance2 = nearest_in_kd_tree(target, far_branch, best, best_distance2)
+
+    return best, best_distance2
+
+
 def normalize(a: Point) -> Point:
     length = mag(a)
     if length <= 0:
@@ -229,15 +285,17 @@ def exact_key(point: Point, scale: float = 1.0e12) -> tuple[int, int, int]:
 
 def nearest_mode(
     target: Point,
-    nodes: list[FemNode],
     exact_index: dict[tuple[int, int, int], FemNode],
+    kd_tree: KdNode | None,
 ) -> tuple[FemNode, float]:
     exact = exact_index.get(exact_key(target))
     if exact is not None:
         return exact, 0.0
 
-    best = min(nodes, key=lambda node: distance2(target, node.point))
-    return best, math.sqrt(distance2(target, best.point))
+    best, best_distance2 = nearest_in_kd_tree(target, kd_tree, None, math.inf)
+    if best is None:
+        raise ValueError("Cannot map to an empty FEM mode")
+    return best, math.sqrt(best_distance2)
 
 
 def write_sample_fem(
@@ -283,6 +341,7 @@ def map_fem_to_patches(
 ) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     exact_index = {exact_key(node.point): node for node in fem_nodes}
+    kd_tree = build_kd_tree(fem_nodes)
     max_distance = 0.0
     row_count = 0
 
@@ -305,7 +364,7 @@ def map_fem_to_patches(
 
         for patch_name, points in sorted(patches.items()):
             for i, point in enumerate(points):
-                node, distance = nearest_mode(point, fem_nodes, exact_index)
+                node, distance = nearest_mode(point, exact_index, kd_tree)
                 max_distance = max(max_distance, distance)
                 row_count += 1
                 writer.writerow(

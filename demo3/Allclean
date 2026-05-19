@@ -1,0 +1,15 @@
+#!/bin/sh
+cd "${0%/*}" || exit
+. ${WM_PROJECT_DIR:?}/bin/tools/CleanFunctions
+
+cleanCase
+
+rm -rf dynamicCode
+rm -rf fem/calculix
+rm -rf fem/surface_modes
+rm -rf fem/structural_modes
+rm -rf fem/view
+rm -f constant/modeShapes/bladeMode1_mapped.csv
+rm -f constant/modeShapes/mode_frequencies.csv
+
+#------------------------------------------------------------------------------

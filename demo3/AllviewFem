@@ -1,0 +1,98 @@
+#!/bin/sh
+cd "${0%/*}" || exit
+
+prepomaxDir="${PREPOMAX_DIR:-fem/prepomax}"
+frdFile="${PREPOMAX_FRD:-${prepomaxDir}/Analysis-1.frd}"
+inpFile="${PREPOMAX_INP:-${prepomaxDir}/Analysis-1.inp}"
+femSurfaceRegex="${FEM_SURFACE_REGEX:-blade.*}"
+modeDir="${MODE_DIR:-fem/structural_modes}"
+viewDir="fem/view"
+freqFile="${modeDir}/mode_frequencies.csv"
+
+if [ ! -f "$freqFile" ]
+then
+    if [ ! -f "$frdFile" ]
+    then
+        echo "Missing ${freqFile} and ${frdFile}." >&2
+        echo "Run ./Allrun first, or place Analysis-1.frd in fem/prepomax." >&2
+        exit 1
+    fi
+    if [ ! -f "$inpFile" ]
+    then
+        echo "Missing ${inpFile}. Named PrePoMax surfaces are needed for FEM extraction." >&2
+        exit 1
+    fi
+
+    mkdir -p "$modeDir"
+    python3 ../scripts/extract_calculix_frd_modes.py \
+        --frd "$frdFile" \
+        --inp "$inpFile" \
+        --out-dir "$modeDir" \
+        --normalize max \
+        --surface-regex "$femSurfaceRegex"
+fi
+
+mode="${MODE:-}"
+if [ -z "$mode" ]
+then
+    mode=$(awk -F, 'NR > 1 && $2 + 0 > 1e-9 {printf "%02d\n", $1; exit}' "$freqFile")
+fi
+
+if [ -z "$mode" ]
+then
+    echo "No positive-frequency mode found in ${freqFile}." >&2
+    exit 1
+fi
+
+case "$mode" in
+    [0-9]) mode="0${mode}" ;;
+esac
+
+scale="${SCALE:-0.05}"
+modeCsv="${modeDir}/mode_${mode}.csv"
+
+if [ ! -f "$modeCsv" ]
+then
+    echo "Missing ${modeCsv}." >&2
+    exit 1
+fi
+
+mkdir -p "$viewDir"
+
+mappedCsv="${viewDir}/mode_${mode}_mapped.csv"
+scaleTag=$(printf "%s" "$scale" | tr -c 'A-Za-z0-9_.-' '_')
+vtkFile="${viewDir}/mode_${mode}_scale_${scaleTag}.vtk"
+
+python3 ../scripts/map_fem_mode_to_patches.py \
+    --case . \
+    --patch-regex 'blade.*' \
+    --fem "$modeCsv" \
+    --out "$mappedCsv"
+
+python3 ../scripts/export_mapped_mode_to_vtk.py \
+    --case . \
+    --patch-regex 'blade.*' \
+    --mapped "$mappedCsv" \
+    --out "$vtkFile" \
+    --scale "$scale"
+
+echo
+echo "Mode view written:"
+echo "  ${vtkFile}"
+echo
+echo "Open it in ParaView, or run:"
+echo "  paraview ${vtkFile}"
+echo
+echo "Examples:"
+echo "  MODE=10 SCALE=0.05 ./AllviewFem"
+echo "  MODE=07 SCALE=0.005 ./AllviewFem"
+
+if [ "${OPEN_PARAVIEW:-0}" = "1" ]
+then
+    if command -v paraview >/dev/null 2>&1
+    then
+        paraview "$vtkFile" >/dev/null 2>&1 &
+    else
+        echo "OPEN_PARAVIEW=1 requested, but paraview was not found in PATH." >&2
+    fi
+fi

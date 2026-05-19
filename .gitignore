@@ -19,6 +19,9 @@ dynamicCode/
 **/constant/triSurface/*.obj
 **/constant/triSurface/*.obj.gz
 **/constant/triSurface/*.eMesh
+**/cellToRegion
+**/constant/cellTable
+**/constant/boundaryRegion
 
 # Demo2 is a FEM-mode import case and currently keeps its reference mesh.
 !demo2/constant/polyMesh/
@@ -37,6 +40,9 @@ dynamicCode/
 # Demo3 generated modal mapping files
 demo3/propeller/constant/modeShapes/femMode1_sample.csv
 demo3/propeller/constant/modeShapes/propellerMode1_mapped.csv
+demo3/fem/
+demo3/constant/modeShapes/bladeMode1_mapped.csv
+demo3/constant/modeShapes/mode_frequencies.csv
 
 # OpenFOAM logs and transient support files
 log.*

@@ -1,0 +1,34 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  2112                                  |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+FoamFile
+{
+    version         2;
+    format          ascii;
+    class           dictionary;
+    object          modeProperties;
+}
+
+modeFile        bladeMode1_mapped.csv;
+
+amplitude       0.001;
+
+frequency       273.9662797;
+
+phase           0;
+
+ibpa            0;
+
+origin          ( 0 0 0 );
+
+axis            ( 0 0 1 );
+
+rotorOmega      158;
+
+
+// ************************************************************************* //

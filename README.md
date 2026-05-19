@@ -6,8 +6,10 @@ Current focus:
 
 - Demo 1: 2D airfoil prescribed modal vibration
 - Demo 2: CalculiX FEM modal analysis and mapped modal vibration
-- Demo 3: 3D rotating propeller FEM modal vibration prototype
+- Demo 3: six-blade rotating propeller workflow driven by PrePoMax/CalculiX modal results
 - OpenFOAM case: `wingMotion2D_pimpleFoam`
+- Project memory for Codex: `AGENTS.md`
+- Project overview: `docs/项目总览_叶片颤振.md`
 - Technical note: `docs/demo1二维自定义振动.md`
 - Technical note: `docs/demo2_FEM模态导入.md`
 - Technical note: `docs/demo3_三维旋转叶片FEM模态颤振.md`
@@ -22,7 +24,7 @@ Tracked content should include:
 - future `scripts/`, `src/`, `cases/`
 - `demo2/demo2A/` CalculiX FEM setup and extracted surface mode CSV files
 - `demo2/demo2B/` OpenFOAM case and mapped mode CSV files
-- `demo3/propeller/` 3D propeller rotating modal-motion case setup
+- `demo3/` active six-blade rotating modal-motion case setup
 
 Ignored content includes:
 
@@ -40,7 +42,7 @@ After installing Git:
 ```bash
 cd ~/OpenFOAM/liyang-v2112/run/wingMotion
 git init
-git add .gitignore README.md docs Allrun Allclean openParaFoam.sh \
+git add .gitignore README.md AGENTS.md docs Allrun Allclean openParaFoam.sh \
     wingMotion2D_pimpleFoam/0 \
     wingMotion2D_pimpleFoam/constant \
     wingMotion2D_pimpleFoam/system \
